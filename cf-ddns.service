@@ -1,0 +1,14 @@
+[Unit]
+Description=Cloudflare Dynamic DNS service
+
+[Install]
+WantedBy=multi-user.target
+
+[Service]
+ExecStart=/bin/cf-ddns -loop -period 5m
+Restart=on-failure
+RestartSec=3
+Environment=CLOUDFLARE_API_TOKEN=<token>
+Environment=RESOLVER=<resolver url>
+Environment=ZONE_ID=<zone id>
+Environment=RECORDS=<comma separated record id list>

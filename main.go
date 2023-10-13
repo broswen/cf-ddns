@@ -4,14 +4,16 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/cloudflare/cloudflare-go"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
 	"time"
+
+	"github.com/cloudflare/cloudflare-go"
 )
 
 type stringArrayFlag []string
@@ -25,14 +27,16 @@ func (i *stringArrayFlag) Set(value string) error {
 	return nil
 }
 
-var records stringArrayFlag
+var flagRecords stringArrayFlag
 
 func main() {
 
 	zoneId := flag.String("zone", os.Getenv("ZONE_ID"), "Cloudflare zone identifier")
 	apiToken := flag.String("token", os.Getenv("CLOUDFLARE_API_TOKEN"), "Cloudflare API token")
 	resolverEndpoint := flag.String("resolver", os.Getenv("RESOLVER"), "Public IP resolver endpoint")
-	flag.Var(&records, "records", "list of identifiers for records to update")
+	flag.Var(&flagRecords, "flagRecords", "list of identifiers for flagRecords to update")
+	loopPeriod := flag.Duration("period", time.Minute*5, "delay between update loops")
+	loop := flag.Bool("loop", false, "whether to loop as a service")
 	flag.Parse()
 
 	if resolverEndpoint == nil || *resolverEndpoint == "" {
@@ -47,6 +51,16 @@ func main() {
 		log.Fatal("api token must be specified")
 	}
 
+	envRecords := strings.Split(os.Getenv("RECORDS"), ",")
+
+	var records []string
+	// cli flags take precedence
+	if len(flagRecords) > 0 {
+		records = flagRecords
+	} else {
+		records = envRecords
+	}
+
 	if len(records) < 1 {
 		log.Fatal("at least one record must be specified")
 	}
@@ -57,18 +71,55 @@ func main() {
 	if err != nil {
 		log.Fatal("couldn't create cloudflare client", err)
 	}
+
+	// run update at least once
+	ctx, cancel := context.WithCancel(context.Background())
+	err = updateRecords(ctx, cf, *zoneId, records, ips)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// set up interrupt handler to cancel context
+	sigs := make(chan os.Signal)
+	signal.Notify(sigs, os.Interrupt)
+	go func() {
+		select {
+		case <-sigs:
+			log.Println("received interrupt")
+			cancel()
+		}
+	}()
+
+	// loop for every ticker tick or until context is cancelled
+	ticker := time.NewTicker(*loopPeriod)
+	for *loop {
+		select {
+		case <-ticker.C:
+			err := updateRecords(ctx, cf, *zoneId, records, ips)
+			if err != nil {
+				log.Fatal(err)
+			}
+		case <-ctx.Done():
+			log.Println("shutting down cf-ddns")
+			return
+		}
+	}
+}
+
+func updateRecords(ctx context.Context, cf *cloudflare.API, zoneId string, records []string, ips ResolutionResult) error {
 	for _, record := range records {
-		res, err := cf.GetDNSRecord(context.Background(), cloudflare.ResourceIdentifier(*zoneId), record)
+		res, err := cf.GetDNSRecord(ctx, cloudflare.ResourceIdentifier(zoneId), record)
 		if err != nil {
 			log.Printf("couldn't get record %s: %s", record, err)
 			continue
 		}
+
 		params := cloudflare.UpdateDNSRecordParams{
 			Type:    res.Type,
 			Name:    res.Name,
 			ID:      record,
 			Proxied: res.Proxied,
-			Comment: fmt.Sprintf("cf-ddns %s", time.Now().Format(time.RFC3339)),
+			Comment: fmt.Sprintf("cf-ddns: %s", time.Now().Format(time.RFC3339)),
 		}
 		if res.Type == "A" {
 			if ips.ipv4 == "" {
@@ -86,13 +137,14 @@ func main() {
 			log.Printf("record %s not of type A or AAAA", record)
 			continue
 		}
-		res, err = cf.UpdateDNSRecord(context.Background(), cloudflare.ResourceIdentifier(*zoneId), params)
+		res, err = cf.UpdateDNSRecord(ctx, cloudflare.ResourceIdentifier(zoneId), params)
 		if err != nil {
 			log.Printf("couldn't update record %s: %s", record, err)
 			continue
 		}
 		log.Printf("updated record %s (%s) with %s", res.Name, res.Type, res.Content)
 	}
+	return nil
 }
 
 func NewIPResolver(endpoint string) *IPResolver {
