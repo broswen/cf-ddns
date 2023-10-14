@@ -5,6 +5,7 @@ Description=Cloudflare Dynamic DNS service
 WantedBy=multi-user.target
 
 [Service]
+Type=simple
 ExecStart=/bin/cf-ddns -loop -period 5m
 Restart=on-failure
 RestartSec=3
