@@ -25,7 +25,7 @@ Specify the environment variables and run the binary.
 
 #### systemd 
 Run the tool as a systemd service.
-1. Build the binary and copy to the system with `go build && cp cf-ddns /bin/cf-ddns`
+1. Build the binary and copy to the system with `make build && cp cf-ddns /bin/cf-ddns`
 1. Copy [cf-ddns.service](./cf-ddns.service) file to `/etc/systemd/service/cf-ddns.service` and specify the environment variables.
 2. Reload systemd configuration with `systemctl daemon-reload`
 3. Enable and start the service with `systemctl enable --now`
@@ -60,4 +60,3 @@ HTTP/2 200 OK
 - [ ] use a nicer CLI library?
 - [ ] optional structured logs with zerolog
 - [ ] build a debian package to do the systemd install automatically
-- [ ] build a docker container image

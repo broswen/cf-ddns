@@ -1,0 +1,10 @@
+services:
+  cf-ddns:
+    build: .
+    # omit if you don't want to loop
+    command: -loop -period 5m
+    environment:
+      - CLOUDFLARE_API_KEY=<token>
+      - RESOLVER=<resolver url>
+      - ZONE_ID=<zone id>
+      - RECORDS=<comma separated record id list>
